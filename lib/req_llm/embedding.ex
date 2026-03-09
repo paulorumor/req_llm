@@ -130,8 +130,6 @@ defmodule ReqLLM.Embedding do
     String.contains?(model_id, "embedding")
   end
 
-  defp embedding_model_id?(_), do: false
-
   @doc """
   Returns the base embedding options schema.
 
