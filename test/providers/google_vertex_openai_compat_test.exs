@@ -125,6 +125,49 @@ defmodule ReqLLM.Providers.GoogleVertex.OpenAICompatTest do
     end
   end
 
+  describe "credentials in provider_options" do
+    test "accepts credentials inside provider_options for chat" do
+      {:ok, model} = ReqLLM.model("google_vertex:gemini-2.5-pro")
+      context = context_fixture()
+
+      opts = [
+        provider_options: [
+          access_token: "fake-token",
+          project_id: "test-project",
+          region: "us-central1"
+        ]
+      ]
+
+      {:ok, request} = GoogleVertex.prepare_request(:chat, model, context, opts)
+      url = URI.to_string(request.url)
+
+      assert url =~ "us-central1-aiplatform.googleapis.com"
+      assert url =~ "projects/test-project"
+    end
+
+    test "top-level credentials take precedence over provider_options for chat" do
+      {:ok, model} = ReqLLM.model("google_vertex:gemini-2.5-pro")
+      context = context_fixture()
+
+      opts = [
+        access_token: "top-token",
+        project_id: "top-project",
+        region: "eu-west4",
+        provider_options: [
+          access_token: "nested-token",
+          project_id: "nested-project",
+          region: "us-central1"
+        ]
+      ]
+
+      {:ok, request} = GoogleVertex.prepare_request(:chat, model, context, opts)
+      url = URI.to_string(request.url)
+
+      assert url =~ "eu-west4-aiplatform.googleapis.com"
+      assert url =~ "projects/top-project"
+    end
+  end
+
   describe "model family resolution" do
     test "GLM model resolves to openai_compat formatter via extra.family" do
       {:ok, model} = ReqLLM.model("google_vertex:zai-org/glm-4.7-maas")

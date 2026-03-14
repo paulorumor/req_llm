@@ -109,6 +109,44 @@ defmodule ReqLLM.Providers.GoogleVertex.EmbeddingTest do
         GoogleVertex.prepare_request(:embedding, @model_spec, "Hello", access_token: "tok")
       end
     end
+
+    test "accepts credentials inside provider_options" do
+      opts = [
+        provider_options: [
+          access_token: "test-token",
+          project_id: "test-project",
+          region: "us-central1"
+        ]
+      ]
+
+      {:ok, request} =
+        GoogleVertex.prepare_request(:embedding, @model_spec, "Hello world", opts)
+
+      url = URI.to_string(request.url)
+      assert url =~ "us-central1-aiplatform.googleapis.com"
+      assert url =~ "projects/test-project"
+    end
+
+    test "top-level credentials take precedence over provider_options" do
+      opts = [
+        access_token: "top-level-token",
+        project_id: "top-project",
+        region: "eu-west1",
+        provider_options: [
+          access_token: "nested-token",
+          project_id: "nested-project",
+          region: "us-central1"
+        ]
+      ]
+
+      {:ok, request} =
+        GoogleVertex.prepare_request(:embedding, @model_spec, "Hello", opts)
+
+      url = URI.to_string(request.url)
+      # Top-level should win
+      assert url =~ "eu-west1-aiplatform.googleapis.com"
+      assert url =~ "projects/top-project"
+    end
   end
 
   describe "decode_embedding_response/1" do

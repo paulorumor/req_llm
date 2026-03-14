@@ -547,18 +547,44 @@ defmodule ReqLLM.Providers.GoogleVertex do
     {gcp_creds, other_opts, model_family, formatter}
   end
 
-  # Extract GCP credentials from options
+  # Extract GCP credentials from options.
+  # Credentials can be passed at the top level or inside :provider_options.
+  # Top-level values take precedence over :provider_options values.
   defp extract_gcp_credentials(opts) do
     gcp_keys = [:service_account_json, :access_token, :project_id, :region]
-    {passed_creds, other_opts} = Keyword.split(opts, gcp_keys)
+
+    # Extract from top-level opts
+    {top_creds, other_opts} = Keyword.split(opts, gcp_keys)
+
+    # Also extract from provider_options (users may pass credentials there per docs)
+    {provider_creds, remaining_provider_opts} =
+      case Keyword.get(other_opts, :provider_options) do
+        po when is_list(po) and po != [] ->
+          {extracted, rest} = Keyword.split(po, gcp_keys)
+          {extracted, rest}
+
+        _ ->
+          {[], nil}
+      end
+
+    # Update provider_options if we extracted credentials from it
+    other_opts =
+      case remaining_provider_opts do
+        nil -> other_opts
+        [] -> Keyword.delete(other_opts, :provider_options)
+        rest -> Keyword.put(other_opts, :provider_options, rest)
+      end
+
+    # Merge: top-level takes precedence over provider_options
+    merged = Keyword.merge(provider_creds, top_creds)
 
     creds = %{
       service_account_json:
-        passed_creds[:service_account_json] ||
+        merged[:service_account_json] ||
           System.get_env("GOOGLE_APPLICATION_CREDENTIALS"),
-      project_id: passed_creds[:project_id] || System.get_env("GOOGLE_CLOUD_PROJECT"),
-      region: passed_creds[:region] || System.get_env("GOOGLE_CLOUD_REGION") || "global",
-      access_token: passed_creds[:access_token]
+      project_id: merged[:project_id] || System.get_env("GOOGLE_CLOUD_PROJECT"),
+      region: merged[:region] || System.get_env("GOOGLE_CLOUD_REGION") || "global",
+      access_token: merged[:access_token]
     }
 
     {creds, other_opts}
