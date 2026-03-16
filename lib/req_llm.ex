@@ -70,7 +70,7 @@ defmodule ReqLLM do
       provider.generate_text(model, messages, opts)
   """
 
-  alias ReqLLM.{Embedding, Generation, Images, Schema, Speech, Tool, Transcription}
+  alias ReqLLM.{Embedding, Generation, Images, OCR, Schema, Speech, Tool, Transcription}
 
   # ===========================================================================
   # Configuration API
@@ -676,6 +676,49 @@ defmodule ReqLLM do
 
   """
   defdelegate embed(model_spec, input, opts \\ []), to: Embedding
+
+  # ===========================================================================
+  # OCR API - Delegated to ReqLLM.OCR
+  # ===========================================================================
+
+  @doc """
+  Extracts rich markdown from documents using OCR models.
+
+  Processes PDFs, images, and other documents through OCR models (e.g., Mistral OCR
+  on Vertex AI) and returns structured markdown with interleaved images.
+
+  ## Parameters
+
+    * `model_spec` - Model specification (e.g., `"google_vertex:mistral-ocr-2505-latest"`)
+    * `document_binary` - Raw document bytes
+    * `opts` - Options (`:include_images`, `:document_type`, `:provider_options`)
+
+  ## Examples
+
+      pdf = File.read!("report.pdf")
+      {:ok, result} = ReqLLM.ocr("google_vertex:mistral-ocr-2505-latest", pdf,
+        provider_options: [region: "europe-west4"]
+      )
+      result.markdown  #=> "# Report Title\\n\\nContent..."
+
+  """
+  defdelegate ocr(model_spec, document_binary, opts \\ []), to: OCR
+
+  @doc """
+  Extracts rich markdown from documents using OCR models. Raises on error.
+  """
+  defdelegate ocr!(model_spec, document_binary, opts \\ []), to: OCR
+
+  @doc """
+  Process a file at the given path through an OCR model.
+  Detects document type from file extension.
+  """
+  defdelegate ocr_file(model_spec, path, opts \\ []), to: OCR
+
+  @doc """
+  Process a file through an OCR model. Raises on error.
+  """
+  defdelegate ocr_file!(model_spec, path, opts \\ []), to: OCR
 
   # ===========================================================================
   # Transcription API - Delegated to ReqLLM.Transcription
