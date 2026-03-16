@@ -526,12 +526,8 @@ defmodule ReqLLM.Providers.AmazonBedrock.Converse do
 
   # Regular message (user, assistant, system)
   defp encode_message(%Message{role: role, content: content}) do
-    # Converse API only accepts "user" or "assistant" roles
-    # Tool results must be wrapped in a "user" message
-    normalized_role = if role == :tool, do: :user, else: role
-
     %{
-      "role" => Atom.to_string(normalized_role),
+      "role" => Atom.to_string(role),
       "content" => encode_content(content)
     }
   end
