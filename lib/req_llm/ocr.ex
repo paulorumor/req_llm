@@ -133,7 +133,7 @@ defmodule ReqLLM.OCR do
     encoded = Base.encode64(document_binary)
     data_url = "data:#{doc_type};base64,#{encoded}"
 
-    %{
+    body = %{
       model: model_id,
       document: %{
         type: "document_url",
@@ -141,6 +141,11 @@ defmodule ReqLLM.OCR do
       },
       include_image_base64: include_images
     }
+
+    case Keyword.get(opts, :pages) do
+      nil -> body
+      pages when is_list(pages) -> Map.put(body, :pages, pages)
+    end
   end
 
   @doc false
