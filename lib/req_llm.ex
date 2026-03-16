@@ -855,14 +855,16 @@ defmodule ReqLLM do
 
   ## Parameters
 
-    * `model_spec` - Model specification (e.g., `"google_vertex:mistral-ocr-2505-latest"`)
+    * `model_spec` - Model specification (e.g., `%{provider: :google_vertex, id: "mistral-ocr-2505"}`)
     * `document_binary` - Raw document bytes
     * `opts` - Options (`:include_images`, `:document_type`, `:provider_options`)
 
   ## Examples
 
       pdf = File.read!("report.pdf")
-      {:ok, result} = ReqLLM.ocr("google_vertex:mistral-ocr-2505-latest", pdf,
+      model = ReqLLM.model!(%{provider: :google_vertex, id: "mistral-ocr-2505"})
+
+      {:ok, result} = ReqLLM.ocr(model, pdf,
         provider_options: [region: "europe-west4"]
       )
       result.markdown  #=> "# Report Title\\n\\nContent..."

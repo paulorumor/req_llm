@@ -16,6 +16,27 @@ defmodule ReqLLM.OCRTest do
 
   @tiny_pdf <<"%PDF-1.0\n1 0 obj\n<< /Type /Catalog >>\nendobj\n">>
 
+  describe "validate_model/1" do
+    test "rejects non-OCR models" do
+      assert {:error, error} = OCR.validate_model("google_vertex:gemini-2.5-flash")
+      assert Exception.message(error) =~ "does not support OCR operations"
+    end
+
+    test "accepts inline OCR models outside the catalog" do
+      assert {:ok, %LLMDB.Model{id: "mistral-ocr-2505"}} =
+               OCR.validate_model(%{provider: :google_vertex, id: "mistral-ocr-2505"})
+    end
+
+    test "accepts inline OCR models declared via family" do
+      assert {:ok, %LLMDB.Model{id: "custom-ocr"}} =
+               OCR.validate_model(%{
+                 provider: :google_vertex,
+                 id: "custom-ocr",
+                 family: "mistral-ocr"
+               })
+    end
+  end
+
   describe "build_ocr_body/3" do
     test "builds request body with defaults" do
       body = OCR.build_ocr_body("mistral-ocr-2505", "hello", [])
@@ -151,7 +172,8 @@ defmodule ReqLLM.OCRTest do
 
   describe "ocr_file/3" do
     test "returns error for missing file" do
-      result = OCR.ocr_file("google_vertex:mistral-ocr-2505", "/nonexistent/file.pdf")
+      result =
+        OCR.ocr_file(%{provider: :google_vertex, id: "mistral-ocr-2505"}, "/nonexistent/file.pdf")
 
       assert {:error, message} = result
       assert message =~ "Cannot read"
@@ -180,10 +202,17 @@ defmodule ReqLLM.OCRTest do
     end
   end
 
+  describe "ocr/3" do
+    test "rejects non-OCR models before preparing a request" do
+      assert {:error, error} = OCR.ocr("google_vertex:gemini-2.5-flash", "binary")
+      assert Exception.message(error) =~ "does not support OCR operations"
+    end
+  end
+
   describe "ocr!/3" do
     test "raises on error" do
-      assert_raise UndefinedFunctionError, fn ->
-        OCR.ocr!("invalid:model", "binary")
+      assert_raise ReqLLM.Error.Invalid.Parameter, ~r/does not support OCR operations/, fn ->
+        OCR.ocr!("google_vertex:gemini-2.5-flash", "binary")
       end
     end
   end

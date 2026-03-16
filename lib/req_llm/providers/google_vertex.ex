@@ -193,7 +193,8 @@ defmodule ReqLLM.Providers.GoogleVertex do
 
   @impl ReqLLM.Provider
   def prepare_request(:ocr, model_input, document_binary, opts) do
-    with {:ok, model} <- ReqLLM.model(model_input) do
+    with {:ok, model} <- ReqLLM.model(model_input),
+         :ok <- validate_ocr_model(model) do
       {gcp_creds, other_opts} = extract_gcp_credentials(opts)
       validate_gcp_credentials!(gcp_creds)
 
@@ -224,7 +225,7 @@ defmodule ReqLLM.Providers.GoogleVertex do
         |> Req.Request.merge_options(operation: :ocr)
         |> Req.Request.put_private(:gcp_credentials, gcp_creds)
         |> Req.Request.put_private(:model, model)
-        |> attach_ocr(gcp_creds)
+        |> attach_ocr(model, gcp_creds, other_opts)
 
       {:ok, request}
     end
@@ -362,11 +363,12 @@ defmodule ReqLLM.Providers.GoogleVertex do
     )
   end
 
-  defp attach_ocr(request, gcp_creds) do
+  defp attach_ocr(request, model, gcp_creds, opts) do
     request
     |> Req.Request.merge_options(finch: ReqLLM.Application.finch_name())
     |> ReqLLM.Step.Error.attach()
     |> ReqLLM.Step.Retry.attach()
+    |> ReqLLM.Step.Fixture.maybe_attach(model, opts)
     |> put_gcp_auth(gcp_creds)
   end
 
@@ -748,6 +750,19 @@ defmodule ReqLLM.Providers.GoogleVertex do
   end
 
   defp extract_embedding_usage(_), do: :error
+
+  defp validate_ocr_model(%LLMDB.Model{} = model) do
+    if ReqLLM.OCR.ocr_capable_model?(model) do
+      :ok
+    else
+      model_string = LLMDB.Model.spec(model)
+
+      {:error,
+       ReqLLM.Error.Invalid.Parameter.exception(
+         parameter: "model: #{model_string} does not support OCR operations"
+       )}
+    end
+  end
 
   def pre_validate_options(operation, model, opts) do
     model_family = get_model_family(model)

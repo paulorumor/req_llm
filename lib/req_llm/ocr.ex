@@ -7,15 +7,17 @@ defmodule ReqLLM.OCR do
 
   ## Examples
 
+      model = ReqLLM.model!(%{provider: :google_vertex, id: "mistral-ocr-2505"})
+
       # Process a PDF binary
-      {:ok, result} = ReqLLM.ocr("google_vertex:mistral-ocr-2505-latest", pdf_binary,
+      {:ok, result} = ReqLLM.ocr(model, pdf_binary,
         provider_options: [region: "europe-west4"]
       )
       result.markdown  #=> "# Title\\n\\nExtracted text with ![images](data:...)..."
       result.pages     #=> [%{index: 0, markdown: "...", images: [...]}]
 
       # Process a file
-      {:ok, result} = ReqLLM.ocr_file("google_vertex:mistral-ocr-2505-latest", "doc.pdf",
+      {:ok, result} = ReqLLM.ocr_file(model, "doc.pdf",
         provider_options: [region: "europe-west4"]
       )
 
@@ -26,14 +28,37 @@ defmodule ReqLLM.OCR do
   - `pages` — list of `%{index: integer, markdown: String.t(), images: [map()]}`
   """
 
+  alias LLMDB.Model
+
   @type ocr_result :: %{markdown: String.t(), pages: [map()]}
+
+  @doc """
+  Validates that a model supports OCR operations.
+  """
+  @spec validate_model(ReqLLM.model_input()) ::
+          {:ok, Model.t()} | {:error, term()}
+  def validate_model(model_spec) do
+    with {:ok, model} <- ReqLLM.model(model_spec),
+         {:ok, _provider_module} <- ReqLLM.provider(model.provider) do
+      model_string = LLMDB.Model.spec(model)
+
+      if ocr_capable_model?(model) do
+        {:ok, model}
+      else
+        {:error,
+         ReqLLM.Error.Invalid.Parameter.exception(
+           parameter: "model: #{model_string} does not support OCR operations"
+         )}
+      end
+    end
+  end
 
   @doc """
   Process a document binary through an OCR model.
 
   ## Parameters
 
-    * `model_spec` — Model specification (e.g., `"google_vertex:mistral-ocr-2505-latest"`)
+    * `model_spec` — Model specification (e.g., `%{provider: :google_vertex, id: "mistral-ocr-2505"}`)
     * `document_binary` — Raw document bytes (PDF, PNG, JPEG, etc.)
     * `opts` — Options:
       - `:include_images` — extract images as base64 in markdown (default `true`)
@@ -43,13 +68,14 @@ defmodule ReqLLM.OCR do
   ## Examples
 
       pdf_bytes = File.read!("document.pdf")
-      {:ok, result} = ReqLLM.ocr("google_vertex:mistral-ocr-2505-latest", pdf_bytes)
+      model = ReqLLM.model!(%{provider: :google_vertex, id: "mistral-ocr-2505"})
+      {:ok, result} = ReqLLM.ocr(model, pdf_bytes)
 
   """
   @spec ocr(String.t() | struct(), binary(), keyword()) ::
           {:ok, ocr_result()} | {:error, term()}
   def ocr(model_spec, document_binary, opts \\ []) do
-    with {:ok, model} <- ReqLLM.model(model_spec),
+    with {:ok, model} <- validate_model(model_spec),
          {:ok, provider_module} <- ReqLLM.provider(model.provider),
          {:ok, request} <-
            provider_module.prepare_request(:ocr, model, document_binary, opts),
@@ -88,7 +114,8 @@ defmodule ReqLLM.OCR do
 
   ## Examples
 
-      {:ok, result} = ReqLLM.ocr_file("google_vertex:mistral-ocr-2505-latest", "report.pdf")
+      model = ReqLLM.model!(%{provider: :google_vertex, id: "mistral-ocr-2505"})
+      {:ok, result} = ReqLLM.ocr_file(model, "report.pdf")
 
   """
   @spec ocr_file(String.t() | struct(), String.t(), keyword()) ::
@@ -177,4 +204,30 @@ defmodule ReqLLM.OCR do
 
     %{markdown: markdown, pages: pages}
   end
+
+  @doc false
+  def ocr_capable_model?(%Model{provider: :google_vertex} = model) do
+    model_id = to_string(model.provider_model_id || model.id || "")
+    family = model.family || get_extra_family(model.extra)
+
+    String.starts_with?(model_id, "mistral-ocr-") or
+      ocr_enabled?(model.capabilities) or
+      family == "mistral-ocr"
+  end
+
+  def ocr_capable_model?(_), do: false
+
+  defp ocr_enabled?(capabilities) when is_map(capabilities) do
+    case capabilities[:ocr] || capabilities["ocr"] do
+      true -> true
+      %{enabled: true} -> true
+      %{"enabled" => true} -> true
+      _ -> false
+    end
+  end
+
+  defp ocr_enabled?(_), do: false
+
+  defp get_extra_family(extra) when is_map(extra), do: extra[:family] || extra["family"]
+  defp get_extra_family(_), do: nil
 end
