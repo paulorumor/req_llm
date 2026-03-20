@@ -1925,4 +1925,86 @@ defmodule ReqLLM.Providers.GoogleTest do
       Enum.any?(headers, fn {n, v} -> n == name and v == value end)
     end
   end
+
+  describe "consecutive role merging for parallel tool results" do
+    test "encode_body merges multiple tool results into a single user entry" do
+      {:ok, model} = ReqLLM.model("google:gemini-1.5-flash")
+
+      context =
+        Context.new([
+          Context.user("What's the weather in SF and NYC?"),
+          Context.assistant("",
+            tool_calls: [
+              %ReqLLM.ToolCall{
+                id: "call_1",
+                type: "function",
+                function: %{name: "get_weather", arguments: ~s({"location":"SF"})}
+              },
+              %ReqLLM.ToolCall{
+                id: "call_2",
+                type: "function",
+                function: %{name: "get_weather", arguments: ~s({"location":"NYC"})}
+              }
+            ]
+          ),
+          Context.tool_result("call_1", "get_weather", "72F sunny"),
+          Context.tool_result("call_2", "get_weather", "58F cloudy")
+        ])
+
+      mock_request = %Req.Request{
+        options: [
+          context: context,
+          model: model.model,
+          stream: false,
+          operation: :chat
+        ]
+      }
+
+      updated_request = Google.encode_body(mock_request)
+      decoded = Jason.decode!(updated_request.body)
+      contents = decoded["contents"]
+
+      tool_result_entries =
+        Enum.filter(contents, fn entry ->
+          Enum.any?(entry["parts"], &Map.has_key?(&1, "functionResponse"))
+        end)
+
+      assert length(tool_result_entries) == 1,
+             "Expected tool results merged into 1 entry, got #{length(tool_result_entries)}"
+
+      [merged] = tool_result_entries
+      fn_parts = Enum.filter(merged["parts"], &Map.has_key?(&1, "functionResponse"))
+      assert length(fn_parts) == 2
+
+      names = Enum.map(fn_parts, & &1["functionResponse"]["name"])
+      assert "get_weather" in names
+    end
+
+    test "encode_body preserves non-consecutive same-role entries separately" do
+      {:ok, model} = ReqLLM.model("google:gemini-1.5-flash")
+
+      context =
+        Context.new([
+          Context.user("Hello"),
+          Context.assistant("Hi there!"),
+          Context.user("How are you?")
+        ])
+
+      mock_request = %Req.Request{
+        options: [
+          context: context,
+          model: model.model,
+          stream: false,
+          operation: :chat
+        ]
+      }
+
+      updated_request = Google.encode_body(mock_request)
+      decoded = Jason.decode!(updated_request.body)
+      contents = decoded["contents"]
+
+      user_entries = Enum.filter(contents, &(&1["role"] == "user"))
+      assert length(user_entries) == 2
+    end
+  end
 end

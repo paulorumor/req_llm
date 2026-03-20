@@ -1822,74 +1822,97 @@ defmodule ReqLLM.Providers.Google do
   end
 
   defp convert_messages_to_gemini(messages) do
-    Enum.map(messages, fn message ->
-      raw_role =
-        case message do
-          %{role: role} -> role
-          %{"role" => role} -> role
-          _ -> "user"
-        end
+    messages
+    |> Enum.map(&convert_single_message_to_gemini/1)
+    |> merge_consecutive_roles()
+  end
 
-      role =
-        case raw_role do
-          :user -> "user"
-          "user" -> "user"
-          :assistant -> "model"
-          "assistant" -> "model"
-          :tool -> "user"
-          "tool" -> "user"
-          :system -> "user"
-          "system" -> "user"
-          other when is_binary(other) -> other
-          other -> to_string(other)
-        end
+  defp convert_single_message_to_gemini(message) do
+    raw_role =
+      case message do
+        %{role: role} -> role
+        %{"role" => role} -> role
+        _ -> "user"
+      end
 
-      raw_content =
-        case message do
-          %{content: content} -> content
-          %{"content" => content} -> content
-          _ -> ""
-        end
+    role =
+      case raw_role do
+        :user -> "user"
+        "user" -> "user"
+        :assistant -> "model"
+        "assistant" -> "model"
+        :tool -> "user"
+        "tool" -> "user"
+        :system -> "user"
+        "system" -> "user"
+        other when is_binary(other) -> other
+        other -> to_string(other)
+      end
 
-      thought_parts = encode_reasoning_details_for_gemini(message)
+    raw_content =
+      case message do
+        %{content: content} -> content
+        %{"content" => content} -> content
+        _ -> ""
+      end
 
-      content_parts =
-        case raw_content do
-          content when is_binary(content) -> [%{text: content}]
-          parts when is_list(parts) -> Enum.map(parts, &convert_content_part/1)
-        end
+    thought_parts = encode_reasoning_details_for_gemini(message)
 
-      tool_call_parts =
-        case message do
-          %{"tool_calls" => tool_calls} when is_list(tool_calls) ->
-            Enum.map(tool_calls, &convert_tool_call_to_function_call/1)
+    content_parts =
+      case raw_content do
+        content when is_binary(content) -> [%{text: content}]
+        parts when is_list(parts) -> Enum.map(parts, &convert_content_part/1)
+      end
 
-          %{tool_calls: tool_calls} when is_list(tool_calls) ->
-            Enum.map(tool_calls, &convert_tool_call_to_function_call/1)
+    tool_call_parts =
+      case message do
+        %{"tool_calls" => tool_calls} when is_list(tool_calls) ->
+          Enum.map(tool_calls, &convert_tool_call_to_function_call/1)
 
-          _ ->
-            []
-        end
+        %{tool_calls: tool_calls} when is_list(tool_calls) ->
+          Enum.map(tool_calls, &convert_tool_call_to_function_call/1)
 
-      tool_result_parts =
-        case message do
-          %{tool_call_id: _call_id, role: "tool"} ->
-            [build_tool_result_part(message, raw_content)]
+        _ ->
+          []
+      end
 
-          %{"tool_call_id" => _call_id, "role" => "tool"} ->
-            [build_tool_result_part(message, raw_content)]
+    tool_result_parts =
+      case message do
+        %{tool_call_id: _call_id, role: "tool"} ->
+          [build_tool_result_part(message, raw_content)]
 
-          %{tool_call_id: _call_id, role: :tool} ->
-            [build_tool_result_part(message, raw_content)]
+        %{"tool_call_id" => _call_id, "role" => "tool"} ->
+          [build_tool_result_part(message, raw_content)]
 
-          _ ->
-            []
-        end
+        %{tool_call_id: _call_id, role: :tool} ->
+          [build_tool_result_part(message, raw_content)]
 
-      parts = thought_parts ++ content_parts ++ tool_call_parts ++ tool_result_parts
+        _ ->
+          []
+      end
 
-      %{role: role, parts: parts}
-    end)
+    parts = thought_parts ++ content_parts ++ tool_call_parts ++ tool_result_parts
+
+    %{role: role, parts: parts}
+  end
+
+  # Gemini requires that consecutive messages with the same role are merged
+  # into a single entry. This is critical for parallel tool calls: N separate
+  # tool result messages (all mapped to role "user") must become one entry
+  # with N functionResponse parts.
+  defp merge_consecutive_roles([]), do: []
+
+  defp merge_consecutive_roles([first | rest]) do
+    {merged, last} =
+      Enum.reduce(rest, {[], first}, fn
+        %{role: role, parts: parts}, {acc, %{role: role} = current} ->
+          {acc, %{current | parts: current.parts ++ parts}}
+
+        entry, {acc, current} ->
+          {acc ++ [current], entry}
+      end)
+
+    merged ++ [last]
   end
 
   defp encode_reasoning_details_for_gemini(message) do
